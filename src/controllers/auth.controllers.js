@@ -1,0 +1,129 @@
+const UserDB = require('../model/users.model');
+const bcrypt = require('bcrypt');
+const dotenv = require('dotenv');
+dotenv.config();
+const { createVerifiedToken } = require('../services/token.services');
+
+const registrationController = async (req, res, next) => {
+  const {
+    body: { username, email, password },
+  } = req;
+
+  const user = await UserDB.findUserByEmail({ email });
+
+  if (user) {
+    return res.json({
+      status: 'Conflict',
+      code: 409,
+      message: 'Email is in use',
+    });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(
+      password,
+      Number(process.env.SALT)
+    );
+    const result = await UserDB.createContact({
+      ...req.body,
+      password: hashedPassword,
+    });
+    res.status(201).json({
+      status: 'Created',
+      code: 201,
+      user: { email, username },
+      message: 'Registration successful',
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+const loginController = async (req, res, next) => {
+  try {
+    const {
+      body: { email, password },
+    } = req;
+    const user = await UserDB.findUserByEmail({ email });
+
+    if (!user) {
+      res.status(404).send(`User with email ${email} is not found`);
+      return;
+    }
+    const isPasswordEqual = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordEqual) {
+      return res.status(401).json({
+        status: 'Unauthorized',
+        code: 401,
+        message: 'Password is wrong',
+      });
+    }
+
+    const token = await createVerifiedToken({ id: user._id });
+
+    await UserDB.updateToken(user._id, token);
+
+    res.status(200).json({
+      status: 'OK',
+      code: 200,
+      userToken: token,
+      user: { email, name: user.username },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+const logoutController = async (req, res, next) => {
+  try {
+    const userInfo = await UserDB.findUserById(req.userId);
+    if (userInfo) {
+      await UserDB.updateToken(req.userId, null);
+      res.json({
+        status: 'No Content',
+        code: 204,
+      });
+    } else {
+      res.json({
+        status: 'Unauthorized',
+        code: 401,
+        message: 'Not authorized',
+      });
+    }
+  } catch (e) {
+    console.log(e);
+    next(e);
+  }
+};
+
+const refreshController = async (req, res, next) => {
+  try {
+    const user = await UserDB.findUserById(req.userId);
+    console.log(user);
+    if (user) {
+      res.json({
+        status: 'OK',
+        code: 200,
+        message: 'User verified',
+        user: { email: user.email, name: user.username },
+      });
+    } else {
+      res.json({
+        status: 'Unauthorized',
+        code: 401,
+        message: 'Not authorized',
+      });
+    }
+  } catch (e) {
+    console.log(e);
+    next(e);
+  }
+};
+
+module.exports = {
+  registrationController,
+  loginController,
+  logoutController,
+  refreshController,
+};
